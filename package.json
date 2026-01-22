@@ -1,0 +1,35 @@
+{
+  "name": "yapl",
+  "version": "1.0.0",
+  "description": "Yet Another Programming Language - A YAML-based programming language",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "yapl": "./src/cli.js"
+  },
+  "scripts": {
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "dev": "vite",
+    "build": "npm run build:ux && npm run build:library",
+    "build:ux": "vite build",
+    "build:library": "BUILD_TARGET=library vite build",
+    "preview": "vite preview",
+    "example": "node src/cli.js example.yapl"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0",
+    "vitest": "^1.0.0",
+    "@vitest/coverage-v8": "^1.0.0",
+    "typescript": "^5.0.0"
+  },
+  "keywords": ["language", "yaml", "transpiler"],
+  "author": "",
+  "license": "MIT"
+}
+

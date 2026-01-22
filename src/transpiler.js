@@ -1,0 +1,726 @@
+// YAPL Transpiler - Converts YAPL to JavaScript and executes with eval
+
+import yaml from 'js-yaml';
+
+/**
+ * @typedef {Object} YAPLAST
+ * @property {string[]} [imports] - List of import paths
+ * @property {GlobalDef[]} [globals] - List of global variable definitions
+ * @property {FunctionDef[]} [functions] - List of function definitions
+ * @property {Expr | Expr[]} [entry] - Entry point expression(s)
+ */
+
+/**
+ * @typedef {Object} GlobalDef
+ * @property {string} name - Variable name
+ * @property {Expr} value - Initial value expression
+ */
+
+/**
+ * @typedef {Object} FunctionDef
+ * @property {string} name - Function name
+ * @property {string[]} params - Parameter names
+ * @property {Expr | Expr[]} body - Function body expression(s)
+ */
+
+/**
+ * @typedef {Object} IfExpr
+ * @property {Expr} cond - Condition expression
+ * @property {Expr} then - Then branch expression
+ * @property {Expr} [else] - Else branch expression (optional)
+ */
+
+/**
+ * @typedef {Object} WhileExpr
+ * @property {Expr} cond - Condition expression
+ * @property {Expr | Expr[]} body - Loop body expression(s)
+ */
+
+/**
+ * @typedef {Object} LetExpr
+ * @property {string} name - Variable name
+ * @property {Expr} value - Initial value expression
+ */
+
+/**
+ * @typedef {Object} LetExprArray
+ * @property {LetExpr[]} - Array of let bindings
+ */
+
+/**
+ * @typedef {string | number | boolean | null | Expr[] | ObjectExpr} Expr
+ */
+
+/**
+ * @typedef {IfForm | WhileForm | LetForm | ReturnForm | Record<string, Expr>} ObjectExpr
+ */
+
+/**
+ * @typedef {Object} IfForm
+ * @property {IfExpr} if
+ */
+
+/**
+ * @typedef {Object} WhileForm
+ * @property {WhileExpr} while
+ */
+
+/**
+ * @typedef {Object} LetForm
+ * @property {LetExpr | LetExpr[]} let
+ */
+
+/**
+ * @typedef {Object} ReturnForm
+ * @property {Expr} return
+ */
+
+/**
+ * Transpiler that converts YAPL (YAML-based programming language) to JavaScript.
+ */
+class YAPLTranspiler {
+  /**
+   * Creates a new YAPL transpiler instance.
+   */
+  constructor() {
+    /** @type {Record<string, boolean>} */
+    this.functions = {};
+    /** @type {Record<string, boolean>} */
+    this.globals = {};
+    /** @type {Record<string, boolean>} */
+    this.params = {};
+  }
+
+  /**
+   * Main entry point: parses YAML content and executes the transpiled JavaScript.
+   * @param {string} yamlContent - YAML string containing YAPL code
+   * @returns {*} The result of executing the transpiled code
+   */
+  run(yamlContent) {
+    /** @type {YAPLAST} */
+    const ast = yaml.load(yamlContent);
+    
+    // Process AST
+    const jsCode = this.transpile(ast);
+    
+    // Execute generated JavaScript
+    return this.execute(jsCode);
+  }
+
+  /**
+   * Transpiles a YAPL AST to JavaScript code.
+   * @param {YAPLAST} ast - The parsed YAPL AST
+   * @returns {string} Generated JavaScript code
+   */
+  transpile(ast) {
+    /** @type {string[]} */
+    const parts = [];
+
+    // Handle imports (for future expansion)
+    if (ast.imports) {
+      parts.push(`// Imports: ${ast.imports.join(', ')}`);
+    }
+
+    // Transpile globals
+    const globals = [];
+    if (ast.globals) {
+      globals.push(...ast.globals.map(g => this.transpileGlobal(g)));
+    }
+
+    // Transpile functions
+    const functions = [];
+    if (ast.functions) {
+      functions.push(...ast.functions.map(f => this.transpileFunction(f)));
+    }
+
+    // Transpile entry point
+    let entryCode = '';
+    if (ast.entry) {
+      entryCode = this.transpileEntryBody(ast.entry);
+    }
+
+    // Wrap everything in an IIFE so globals, functions, and entry are in the same scope
+    const bodyParts = [
+      ...globals.map(g => this.indent(g, 2)),
+      ...functions.map(f => this.indent(f, 2)),
+      entryCode ? entryCode : this.indent('return null;', 2)
+    ].filter(Boolean);
+
+    return `(() => {\n${bodyParts.join('\n')}\n})()`;
+  }
+
+  /**
+   * Transpiles a global variable definition.
+   * @param {GlobalDef} global - Global variable definition
+   * @returns {string} JavaScript code for the global variable
+   */
+  transpileGlobal(global) {
+    const name = global.name;
+    const value = this.transpileExpr(global.value, 0);
+    this.globals[name] = true;
+    return `let ${name} = ${value};`;
+  }
+
+  /**
+   * Transpiles a function definition.
+   * @param {FunctionDef} func - Function definition
+   * @returns {string} JavaScript code for the function
+   */
+  transpileFunction(func) {
+    const name = func.name;
+    const params = func.params || [];
+    const body = func.body || [];
+    
+    this.functions[name] = true;
+
+    // Track parameters so they're treated as identifiers in the function body
+    const oldParams = { ...this.params };
+    params.forEach(param => {
+      this.params[param] = true;
+    });
+
+    // Handle body - could be single expression or list
+    let bodyCode;
+    if (Array.isArray(body)) {
+      if (body.length === 0) {
+        bodyCode = 'return null;';
+      } else {
+        const statements = body.map((stmt, i) => {
+          const code = this.transpileExpr(stmt, 0);
+          // Last statement is return value
+          return i === body.length - 1 ? `return ${code};` : `${code};`;
+        });
+        bodyCode = this.indent(statements.join('\n'), 2);
+      }
+    } else {
+      bodyCode = `return ${this.transpileExpr(body, 0)};`;
+    }
+
+    // Restore previous params state
+    this.params = oldParams;
+
+    return `function ${name}(${params.join(', ')}) {\n${bodyCode}\n}`;
+  }
+
+  /**
+   * Transpiles the entry point expression(s) body (without IIFE wrapper).
+   * @param {Expr | Expr[]} entry - Entry point expression or array of expressions
+   * @returns {string} JavaScript code for the entry point body
+   */
+  transpileEntryBody(entry) {
+    if (!Array.isArray(entry)) {
+      return this.indent(`return ${this.transpileExpr(entry, 0)};`, 2);
+    }
+
+    if (entry.length === 0) {
+      return this.indent('return null;', 2);
+    }
+    if (entry.length === 1) {
+      return this.indent(`return ${this.transpileExpr(entry[0], 0)};`, 2);
+    }
+
+    // Handle let bindings specially - they need to be in the outer scope
+    // But preserve execution order - process in sequence
+    const orderedStatements = [];
+    const declaredVars = new Set();
+    
+    for (const expr of entry) {
+      // Check if this is a let binding
+      if (typeof expr === 'object' && expr.let) {
+        const letExpr = expr.let;
+        if (typeof letExpr === 'object' && letExpr.name) {
+          // Single let binding - declare in outer scope
+          const name = letExpr.name;
+          const value = this.transpileExpr(letExpr.value, 0);
+          orderedStatements.push({ type: 'let', name, value: `let ${name} = ${value};` });
+          // Track it as a parameter so it's treated as an identifier
+          this.params[name] = true;
+          declaredVars.add(name);
+        } else if (Array.isArray(letExpr)) {
+          // Multiple let bindings
+          letExpr.forEach(b => {
+            const name = b.name;
+            const value = this.transpileExpr(b.value, 0);
+            orderedStatements.push({ type: 'let', name, value: `let ${name} = ${value};` });
+            this.params[name] = true;
+            declaredVars.add(name);
+          });
+        }
+      } else {
+        // Regular expression
+        const code = this.transpileExpr(expr, 0);
+        orderedStatements.push({ type: 'expr', value: `${code};` });
+      }
+    }
+
+    // Build the code preserving order
+    if (orderedStatements.length === 0) {
+      return this.indent('return null;', 2);
+    }
+    
+    const statements = orderedStatements.map(s => s.value);
+    const lastStmt = statements[statements.length - 1];
+    
+    // If last statement is a let binding, we need to return the variable
+    const lastOrdered = orderedStatements[orderedStatements.length - 1];
+    if (lastOrdered.type === 'let') {
+      statements[statements.length - 1] = lastStmt.replace(';', '');
+      statements.push(`return ${lastOrdered.name};`);
+    } else {
+      // Remove semicolon from last statement and make it a return
+      statements[statements.length - 1] = `return ${lastStmt.replace(';', '')};`;
+    }
+    
+    return this.indent(statements.join('\n'), 2);
+  }
+
+  /**
+   * Transpiles an expression to JavaScript code.
+   * @param {Expr} expr - Expression to transpile
+   * @param {number} precedence - Current operator precedence (higher = tighter binding)
+   * @returns {string} JavaScript code
+   * @throws {Error} If the expression cannot be transpiled
+   */
+  transpileExpr(expr, precedence = 0) {
+    // Handle null/undefined
+    if (expr === null || expr === undefined) {
+      return 'null';
+    }
+
+    // Handle arrays (expressions)
+    if (Array.isArray(expr)) {
+      return this.transpileArrayExpr(expr, precedence);
+    }
+
+    // Handle objects (special forms)
+    if (typeof expr === 'object') {
+      return this.transpileObjectExpr(expr, precedence);
+    }
+
+    // Handle variable/function reference (string) - check BEFORE primitives
+    // because identifiers are also strings, but shouldn't be JSON.stringify'd
+    if (typeof expr === 'string') {
+      // Treat as identifier if it's registered as a function, global, or parameter
+      // This prevents string literals like "YAPL" from being treated as identifiers
+      if (this.functions[expr] || this.globals[expr] || this.params[expr]) {
+        return this.transpileIdentifier(expr);
+      }
+      // Otherwise treat as string literal
+      return JSON.stringify(expr);
+    }
+
+    // Handle primitives (numbers, booleans)
+    if (this.isPrimitive(expr)) {
+      return JSON.stringify(expr);
+    }
+
+    throw new Error(`Cannot transpile: ${JSON.stringify(expr)}`);
+  }
+
+  /**
+   * Transpiles an identifier (variable, function, or JavaScript global).
+   * @param {string} name - Identifier name
+   * @returns {string} JavaScript identifier
+   */
+  transpileIdentifier(name) {
+    // If it's a YAPL function or global, use it directly
+    if (this.functions[name] || this.globals[name]) {
+      return name;
+    }
+    
+    // Otherwise, it's a JavaScript global - use it directly
+    // JavaScript will resolve it at runtime
+    return name;
+  }
+
+  /**
+   * Transpiles an array expression (function call, operator, or array literal).
+   * @param {Expr[]} expr - Array expression
+   * @param {number} precedence - Current operator precedence
+   * @returns {string} JavaScript code
+   */
+  transpileArrayExpr(expr, precedence = 0) {
+    if (expr.length === 0) {
+      return '[]';
+    }
+
+    const [first, ...rest] = expr;
+
+    // Check if first element is an operator
+    if (typeof first === 'string' && this.isOperator(first)) {
+      return this.transpileOperator(first, rest, precedence);
+    }
+
+    // Check if first element is property access operator
+    if (first === '.') {
+      return this.transpilePropertyAccess(rest, precedence);
+    }
+
+    // Function call - first element is function name
+    const funcName = this.transpileIdentifier(first);
+    // Arguments don't need parentheses unless they contain operators with lower precedence
+    const args = rest.map(arg => this.transpileExpr(arg, 0));
+    return this.maybeParenthesize(`${funcName}(${args.join(', ')})`, precedence, 20);
+
+    // Array literal would be handled by checking if first is not a string
+    // But we're treating all arrays as function calls if first is identifier
+  }
+
+  /**
+   * Transpiles an object expression (special forms or object literal).
+   * @param {ObjectExpr} expr - Object expression
+   * @param {number} precedence - Current operator precedence
+   * @returns {string} JavaScript code
+   */
+  transpileObjectExpr(expr, precedence = 0) {
+    // if statement
+    if (expr.if) {
+      const cond = this.transpileExpr(expr.if.cond, 0);
+      const thenExpr = this.transpileExpr(expr.if.then, 0);
+      const elseExpr = expr.if.else !== undefined 
+        ? this.transpileExpr(expr.if.else, 0)
+        : 'null';
+      return this.maybeParenthesize(`${cond} ? ${thenExpr} : ${elseExpr}`, precedence, 3);
+    }
+
+    // while loop
+    if (expr.while) {
+      const cond = this.transpileExpr(expr.while.cond, 0);
+      const body = Array.isArray(expr.while.body)
+        ? expr.while.body.map(s => this.transpileExpr(s, 0)).join(';\n      ')
+        : this.transpileExpr(expr.while.body, 0);
+      const bodyIndented = this.indent(body, 6);
+      return `(() => {\n    while (${cond}) {\n      ${bodyIndented};\n    }\n  })()`;
+    }
+
+    // let binding
+    if (expr.let) {
+      return this.transpileLet(expr.let, precedence);
+    }
+
+    // return statement
+    if (expr.return !== undefined) {
+      return this.transpileExpr(expr.return, 0);
+    }
+
+    // Object literal
+    const entries = Object.entries(expr).map(([k, v]) => {
+      return `${k}: ${this.transpileExpr(v, 0)}`;
+    });
+    return `{${entries.join(', ')}}`;
+  }
+
+  /**
+   * Transpiles a let binding expression.
+   * @param {LetExpr | LetExpr[]} letExpr - Let binding(s)
+   * @param {number} precedence - Current operator precedence
+   * @returns {string} JavaScript code
+   * @throws {Error} If the let form is invalid
+   */
+  transpileLet(letExpr, precedence = 0) {
+    if (typeof letExpr === 'object' && letExpr.name) {
+      // Single binding
+      const name = letExpr.name;
+      const value = this.transpileExpr(letExpr.value, 0);
+      return this.maybeParenthesize(`(() => {\n    let ${name} = ${value};\n    return ${name};\n  })()`, precedence, 0);
+    } else if (Array.isArray(letExpr)) {
+      // Multiple bindings
+      const bindings = letExpr.map(b => {
+        const name = b.name;
+        const value = this.transpileExpr(b.value, 0);
+        return `let ${name} = ${value};`;
+      }).join('\n    ');
+      return this.maybeParenthesize(`(() => {\n    ${bindings}\n  })()`, precedence, 0);
+    }
+    throw new Error(`Invalid let form: ${JSON.stringify(letExpr)}`);
+  }
+
+  /**
+   * Transpiles an operator expression.
+   * @param {string} op - Operator name
+   * @param {Expr[]} args - Operator arguments
+   * @param {number} precedence - Current operator precedence
+   * @returns {string} JavaScript code
+   * @throws {Error} If the operator is unknown
+   */
+  transpileOperator(op, args, precedence = 0) {
+    // Operator precedence levels (higher = tighter binding)
+    const PREC = {
+      '||': 1,
+      '&&': 2,
+      '==': 3, '!=': 3, '<': 3, '>': 3, '<=': 3, '>=': 3,
+      '+': 4, '-': 4,
+      '*': 5, '/': 5, '%': 5,
+      '**': 6,
+      '!': 7, 'typeof': 7, 'instanceof': 7,
+      'unary+': 7, 'unary-': 7
+    };
+
+    const opPrec = PREC[op] || 0;
+    
+    switch (op) {
+      // Arithmetic
+      case '+':
+        if (args.length === 1) {
+          const arg = this.transpileExpr(args[0], opPrec);
+          return this.maybeParenthesize(`+${arg}`, precedence, opPrec);
+        }
+        // Check if this is string concatenation - use template literals if possible
+        const addArgs = args.map((arg, i) => {
+          return this.transpileExpr(arg, opPrec);
+        });
+        // Try to convert string concatenation to template literals
+        const templateResult = this.convertStringConcatToTemplate(addArgs);
+        if (templateResult) {
+          return this.maybeParenthesize(templateResult, precedence, opPrec);
+        }
+        // Otherwise use regular addition
+        const result = addArgs.join(' + ');
+        return this.maybeParenthesize(result, precedence, opPrec);
+      case '-':
+        if (args.length === 1) {
+          const arg = this.transpileExpr(args[0], opPrec);
+          return this.maybeParenthesize(`-${arg}`, precedence, opPrec);
+        }
+        const subArgs = args.map((arg, i) => {
+          const prec = i === 0 ? opPrec : opPrec;
+          return this.transpileExpr(arg, prec);
+        });
+        return this.maybeParenthesize(subArgs.join(' - '), precedence, opPrec);
+      case '*':
+        const mulArgs = args.map((arg, i) => {
+          const prec = i === 0 ? opPrec : opPrec;
+          return this.transpileExpr(arg, prec);
+        });
+        return this.maybeParenthesize(mulArgs.join(' * '), precedence, opPrec);
+      case '/':
+        const divArgs = args.map((arg, i) => {
+          const prec = i === 0 ? opPrec : opPrec;
+          return this.transpileExpr(arg, prec);
+        });
+        return this.maybeParenthesize(divArgs.join(' / '), precedence, opPrec);
+      case '%':
+        const modArgs = args.map((arg, i) => {
+          const prec = i === 0 ? opPrec : opPrec;
+          return this.transpileExpr(arg, prec);
+        });
+        return this.maybeParenthesize(`${modArgs[0]} % ${modArgs[1]}`, precedence, opPrec);
+      case '**':
+        const powArgs = args.map((arg, i) => {
+          const prec = i === 0 ? opPrec : opPrec;
+          return this.transpileExpr(arg, prec);
+        });
+        return this.maybeParenthesize(`${powArgs[0]} ** ${powArgs[1]}`, precedence, opPrec);
+
+      // Comparison
+      case '==':
+        const eqArgs = args.map((arg, i) => this.transpileExpr(arg, opPrec));
+        return this.maybeParenthesize(`${eqArgs[0]} === ${eqArgs[1]}`, precedence, opPrec);
+      case '!=':
+        const neArgs = args.map((arg, i) => this.transpileExpr(arg, opPrec));
+        return this.maybeParenthesize(`${neArgs[0]} !== ${neArgs[1]}`, precedence, opPrec);
+      case '<':
+        const ltArgs = args.map((arg, i) => this.transpileExpr(arg, opPrec));
+        return this.maybeParenthesize(`${ltArgs[0]} < ${ltArgs[1]}`, precedence, opPrec);
+      case '>':
+        const gtArgs = args.map((arg, i) => this.transpileExpr(arg, opPrec));
+        return this.maybeParenthesize(`${gtArgs[0]} > ${gtArgs[1]}`, precedence, opPrec);
+      case '<=':
+        const leArgs = args.map((arg, i) => this.transpileExpr(arg, opPrec));
+        return this.maybeParenthesize(`${leArgs[0]} <= ${leArgs[1]}`, precedence, opPrec);
+      case '>=':
+        const geArgs = args.map((arg, i) => this.transpileExpr(arg, opPrec));
+        return this.maybeParenthesize(`${geArgs[0]} >= ${geArgs[1]}`, precedence, opPrec);
+
+      // Logical
+      case '&&':
+        const andArgs = args.map((arg, i) => this.transpileExpr(arg, opPrec));
+        return this.maybeParenthesize(andArgs.join(' && '), precedence, opPrec);
+      case '||':
+        const orArgs = args.map((arg, i) => this.transpileExpr(arg, opPrec));
+        return this.maybeParenthesize(orArgs.join(' || '), precedence, opPrec);
+      case '!':
+        const notArg = this.transpileExpr(args[0], opPrec);
+        return this.maybeParenthesize(`!${notArg}`, precedence, opPrec);
+
+      // Type checking
+      case 'typeof':
+        const typeofArg = this.transpileExpr(args[0], opPrec);
+        return this.maybeParenthesize(`typeof ${typeofArg}`, precedence, opPrec);
+      case 'instanceof':
+        const instArgs = args.map((arg, i) => this.transpileExpr(arg, opPrec));
+        return this.maybeParenthesize(`${instArgs[0]} instanceof ${instArgs[1]}`, precedence, opPrec);
+
+      default:
+        throw new Error(`Unknown operator: ${op}`);
+    }
+  }
+
+  /**
+   * Transpiles a property access expression.
+   * @param {Expr[]} args - Arguments: [object, property, ...methodArgs]
+   * @param {number} precedence - Current operator precedence
+   * @returns {string} JavaScript code
+   * @throws {Error} If insufficient arguments are provided
+   */
+  transpilePropertyAccess(args, precedence = 0) {
+    if (args.length < 2) {
+      throw new Error('Property access requires at least object and property');
+    }
+
+    const obj = this.transpileExpr(args[0], 20); // High precedence for property access
+    const prop = args[1];
+    
+    // If property is a string, use dot notation or bracket notation
+    if (typeof prop === 'string' && /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(prop)) {
+      // Valid identifier, use dot notation
+      if (args.length === 2) {
+        return this.maybeParenthesize(`${obj}.${prop}`, precedence, 20);
+      } else {
+        // Method call
+        const methodArgs = args.slice(2).map(arg => this.transpileExpr(arg, 20));
+        return this.maybeParenthesize(`${obj}.${prop}(${methodArgs.join(', ')})`, precedence, 20);
+      }
+    } else {
+      // Use bracket notation
+      const propExpr = this.transpileExpr(prop, 20);
+      if (args.length === 2) {
+        return this.maybeParenthesize(`${obj}[${propExpr}]`, precedence, 20);
+      } else {
+        const methodArgs = args.slice(2).map(arg => this.transpileExpr(arg, 20));
+        return this.maybeParenthesize(`${obj}[${propExpr}](${methodArgs.join(', ')})`, precedence, 20);
+      }
+    }
+  }
+
+  /**
+   * Checks if a string is a recognized operator.
+   * @param {string} str - String to check
+   * @returns {boolean} True if the string is an operator
+   */
+  isOperator(str) {
+    const operators = ['+', '-', '*', '/', '%', '**',
+                      '==', '!=', '<', '>', '<=', '>=',
+                      '&&', '||', '!',
+                      'typeof', 'instanceof', '.'];
+    return operators.includes(str);
+  }
+
+  /**
+   * Checks if a value is a JavaScript primitive type.
+   * @param {*} value - Value to check
+   * @returns {boolean} True if the value is a primitive
+   */
+  isPrimitive(value) {
+    return typeof value === 'number' ||
+           typeof value === 'string' ||
+           typeof value === 'boolean';
+  }
+
+  /**
+   * Adds parentheses if needed based on operator precedence.
+   * @param {string} code - Code to potentially wrap
+   * @param {number} outerPrec - Outer operator precedence
+   * @param {number} innerPrec - Inner operator precedence
+   * @returns {string} Code with parentheses if needed
+   */
+  maybeParenthesize(code, outerPrec, innerPrec) {
+    if (outerPrec > innerPrec) {
+      return `(${code})`;
+    }
+    return code;
+  }
+
+  /**
+   * Indents a multi-line string by the specified number of spaces.
+   * @param {string} text - Text to indent
+   * @param {number} spaces - Number of spaces to indent
+   * @returns {string} Indented text
+   */
+  indent(text, spaces) {
+    const indentStr = ' '.repeat(spaces);
+    return text.split('\n').map(line => indentStr + line).join('\n');
+  }
+
+  /**
+   * Converts string concatenation expressions to template literals when possible.
+   * @param {string[]} parts - Array of transpiled expression parts
+   * @returns {string|null} Template literal string or null if conversion not possible
+   */
+  convertStringConcatToTemplate(parts) {
+    if (parts.length === 0) return null;
+    
+    // Check if any part is a string literal (starts and ends with quotes)
+    const hasStringLiteral = parts.some(part => {
+      const trimmed = part.trim();
+      return (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+             (trimmed.startsWith("'") && trimmed.endsWith("'"));
+    });
+    
+    if (!hasStringLiteral) return null;
+    
+    // Build template literal parts
+    const templateParts = [];
+    let currentString = '';
+    
+    for (const part of parts) {
+      const trimmed = part.trim();
+      const isStringLiteral = (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+                              (trimmed.startsWith("'") && trimmed.endsWith("'"));
+      
+      if (isStringLiteral) {
+        // Extract string content (remove quotes)
+        const content = trimmed.slice(1, -1);
+        currentString += content;
+      } else {
+        // If we have accumulated string content, add it as text
+        if (currentString) {
+          templateParts.push({ type: 'text', content: currentString });
+          currentString = '';
+        }
+        // Add expression
+        templateParts.push({ type: 'expr', content: part });
+      }
+    }
+    
+    // Add any remaining string content
+    if (currentString) {
+      templateParts.push({ type: 'text', content: currentString });
+    }
+    
+    // If we only have text parts, it's just a string literal
+    if (templateParts.every(p => p.type === 'text')) {
+      return JSON.stringify(templateParts.map(p => p.content).join(''));
+    }
+    
+    // Build template literal
+    const template = templateParts.map(p => {
+      if (p.type === 'text') {
+        // Escape backticks and ${ in text
+        return p.content.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+      } else {
+        return `\${${p.content}}`;
+      }
+    }).join('');
+    
+    return `\`${template}\``;
+  }
+
+  /**
+   * Executes generated JavaScript code using eval.
+   * @param {string} jsCode - JavaScript code to execute
+   * @returns {*} The result of executing the code
+   * @throws {Error} If execution fails
+   */
+  execute(jsCode) {
+    try {
+      return eval(jsCode);
+    } catch (error) {
+      console.error('Generated JavaScript:');
+      console.error(jsCode);
+      throw error;
+    }
+  }
+}
+
+export default YAPLTranspiler;

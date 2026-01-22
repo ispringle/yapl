@@ -1,0 +1,74 @@
+# YAPL Example - Demonstrates functions, globals, and JavaScript integration
+
+functions:
+  # Recursive Fibonacci function
+  # Returns the nth Fibonacci number
+  - name: fib
+    params: [n]
+    body:
+      - if:
+          cond: ['<', n, 2]  # Base case: fib(0) = 0, fib(1) = 1
+          then: n
+          else:
+            # Recursive case: fib(n) = fib(n-1) + fib(n-2)
+            ['+',
+             [fib, ['-', n, 1]],
+             [fib, ['-', n, 2]]]
+
+  # Simple greeting function using JavaScript console.log
+  - name: greet
+    params: [name]
+    body:
+      - [console.log, ['+', "Hello, ", name, "!"]]
+
+  # Recursive factorial function using block style YAML
+  # Returns n! (n factorial)
+  - name: factorial
+    params: [n]
+    body:
+      - if:
+          cond:
+            - '<='
+            - n
+            - 1  # Base case: 0! = 1, 1! = 1
+          then: 1
+          else:
+            # Recursive case: n! = n * (n-1)!
+            - '*'
+            - n
+            - - factorial
+              - - '-'
+                - n
+                - 1
+
+# Global variables available throughout the program
+globals:
+  - name: pi
+    value: 3.14159
+
+# Entry point - code executed when program runs
+entry:
+  # Greet the user
+  - [greet, "YAPL"]
+  
+  # Calculate Fibonacci number and store in a variable
+  - let:
+      name: fibResult
+      value: [fib, 10]
+  
+  # Log the result
+  - [console.log, fibResult]
+  
+  # Use global variable and JavaScript Math operations
+  - [console.log, ['*', pi, 2]]  # Calculate 2π
+  
+  # Call JavaScript built-in function
+  - [Math.max, 1, 2, 3, 4, 5]
+  
+  # Calculate and display factorial using block style
+  - - console.log
+    - - '+'
+      - "Factorial of 5: "
+      - - factorial
+        - 5
+

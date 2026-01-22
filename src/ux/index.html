@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YAPL - Yet Another Programming Language</title>
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background: #1e1e1e;
+      color: #d4d4d4;
+    }
+
+    .header {
+      background: #2d2d30;
+      padding: 1rem;
+      border-bottom: 1px solid #3e3e42;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .header h1 {
+      font-size: 1.5rem;
+      color: #4ec9b0;
+    }
+
+    .run-button {
+      background: #0e639c;
+      color: white;
+      border: none;
+      padding: 0.5rem 1.5rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1rem;
+      font-weight: 500;
+      transition: background 0.2s;
+    }
+
+    .run-button:hover {
+      background: #1177bb;
+    }
+
+    .run-button:active {
+      background: #0a4d73;
+    }
+
+    .container {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .pane {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid #3e3e42;
+    }
+
+    .pane:last-child {
+      border-right: none;
+    }
+
+    .pane-header {
+      background: #252526;
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid #3e3e42;
+      font-weight: 500;
+      color: #cccccc;
+      font-size: 0.9rem;
+    }
+
+    .editor-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #editor {
+      flex: 1;
+      width: 100%;
+      padding: 1rem;
+      background: #1e1e1e;
+      color: #d4d4d4;
+      border: none;
+      resize: none;
+      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+      font-size: 14px;
+      line-height: 1.5;
+      tab-size: 2;
+      outline: none;
+    }
+
+    #editor:focus {
+      background: #1e1e1e;
+    }
+
+    .js-container {
+      flex: 1;
+      overflow: auto;
+      padding: 1rem;
+      background: #1e1e1e;
+    }
+
+    #javascript {
+      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+      font-size: 14px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      color: #d4d4d4;
+    }
+
+    .output-container {
+      flex: 1;
+      overflow: auto;
+      padding: 1rem;
+      background: #1e1e1e;
+    }
+
+    #output {
+      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+      font-size: 14px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    .error {
+      color: #f48771;
+    }
+
+    .success {
+      color: #4ec9b0;
+    }
+
+    .log-output {
+      color: #dcdcaa;
+      margin-bottom: 0.5rem;
+    }
+
+    .result-output {
+      color: #4ec9b0;
+      margin-top: 1rem;
+      padding-top: 1rem;
+      border-top: 1px solid #3e3e42;
+      font-weight: 500;
+    }
+
+    .example-link {
+      color: #4ec9b0;
+      text-decoration: none;
+      font-size: 0.9rem;
+      margin-left: 1rem;
+    }
+
+    .example-link:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>YAPL - Yet Another Programming Language</h1>
+    <div>
+      <a href="#" class="example-link" id="load-example">Load Example</a>
+      <button class="run-button" onclick="runYAPL()">Run</button>
+    </div>
+  </div>
+  
+  <div class="container">
+    <div class="pane">
+      <div class="pane-header">Editor</div>
+      <div class="editor-container">
+        <textarea id="editor" spellcheck="false"></textarea>
+      </div>
+    </div>
+    
+    <div class="pane">
+      <div class="pane-header">JavaScript</div>
+      <div class="js-container">
+        <div id="javascript">Transpiled JavaScript will appear here after running.</div>
+      </div>
+    </div>
+    
+    <div class="pane">
+      <div class="pane-header">Output</div>
+      <div class="output-container">
+        <div id="output">Ready to run YAPL code. Click "Run" to execute.</div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" id="transpiler-loader">
+    // This will be replaced with inline transpiler code during build
+    import YAPLTranspiler from '../transpiler.js';
+    window.YAPLTranspiler = YAPLTranspiler;
+  </script>
+  <script>
+    // Default example code (loaded from example.yapl at build time)
+    const defaultCode = `<!-- EXAMPLE_PLACEHOLDER -->`;
+
+    // Load example code
+    document.getElementById('load-example').addEventListener('click', (e) => {
+      e.preventDefault();
+      document.getElementById('editor').value = defaultCode;
+    });
+
+    // Override console.log to capture output
+    const originalLog = console.log;
+    const originalError = console.error;
+    const logs = [];
+
+    function captureConsole() {
+      logs.length = 0;
+      console.log = (...args) => {
+        logs.push({ type: 'log', args });
+        originalLog.apply(console, args);
+      };
+      console.error = (...args) => {
+        logs.push({ type: 'error', args });
+        originalError.apply(console, args);
+      };
+    }
+
+    function restoreConsole() {
+      console.log = originalLog;
+      console.error = originalError;
+    }
+
+    function runYAPL() {
+      const editor = document.getElementById('editor');
+      const javascript = document.getElementById('javascript');
+      const output = document.getElementById('output');
+      const code = editor.value;
+
+      if (!code.trim()) {
+        output.innerHTML = '<span class="error">Please enter some YAPL code.</span>';
+        javascript.textContent = '';
+        return;
+      }
+
+      try {
+        captureConsole();
+        
+        const transpiler = new YAPLTranspiler();
+        
+        // Get the transpiled JavaScript code
+        // Parse YAML first to get AST, then transpile
+        const ast = jsyaml.load(code);
+        const jsCode = transpiler.transpile(ast);
+        javascript.textContent = jsCode;
+        
+        // Execute the code
+        const result = transpiler.run(code);
+
+        restoreConsole();
+
+        // Display logs (all results are now logged, so show them in order)
+        let outputHTML = '';
+        if (logs.length > 0) {
+          outputHTML += '<div class="log-output">';
+          logs.forEach(log => {
+            const className = log.type === 'error' ? 'error' : '';
+            const message = log.args.map(arg => {
+              if (typeof arg === 'object') {
+                return JSON.stringify(arg, null, 2);
+              }
+              return String(arg);
+            }).join(' ');
+            outputHTML += `<div class="${className}">${escapeHtml(message)}</div>`;
+          });
+          outputHTML += '</div>';
+        }
+
+        // Only show final result if it's different from the last logged value
+        // (to avoid duplication since we're now logging all intermediate results)
+        const lastLogValue = logs.length > 0 ? logs[logs.length - 1].args[0] : null;
+        if (result !== undefined && result !== null && result !== lastLogValue) {
+          const resultStr = typeof result === 'object' 
+            ? JSON.stringify(result, null, 2)
+            : String(result);
+          outputHTML += `<div class="result-output">Final result: <span class="success">${escapeHtml(resultStr)}</span></div>`;
+        } else if (logs.length === 0) {
+          // Only show "no return value" if there were no logs at all
+          outputHTML += '<div class="result-output">Result: <span class="success">(no return value)</span></div>';
+        }
+
+        output.innerHTML = outputHTML;
+      } catch (error) {
+        restoreConsole();
+        output.innerHTML = `<div class="error">Error: ${escapeHtml(error.message)}</div>`;
+        if (error.stack) {
+          output.innerHTML += `<div class="error" style="margin-top: 0.5rem; font-size: 0.9rem;">${escapeHtml(error.stack)}</div>`;
+        }
+        // Show error in JavaScript pane too
+        javascript.textContent = `// Error transpiling code:\n// ${error.message}`;
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Load default example on page load
+    document.getElementById('editor').value = defaultCode;
+  </script>
+</body>
+</html>
+
