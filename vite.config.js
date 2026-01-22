@@ -49,28 +49,23 @@ const inlineTranspilerPlugin = () => {
       let html = readFileSync(htmlPath, 'utf-8');
       let modified = false;
       
-      // Find the bundled transpiler JS file and inline it
+      // Inline the transpiler module script content directly into HTML
+      // This keeps everything in one file while preserving ES module functionality
       const scriptTagMatch = html.match(/<script type="module"[^>]*src="\/assets\/([^"]+\.js)"[^>]*><\/script>/);
       if (scriptTagMatch) {
         const bundledJsFile = scriptTagMatch[1];
         const bundledJsPath = resolve('dist/assets', bundledJsFile);
         
         if (existsSync(bundledJsPath)) {
-          // Read the bundled JS file (Vite has already processed it correctly)
           let bundledCode = readFileSync(bundledJsPath, 'utf-8');
           
-          // Only escape </script> tags to prevent premature script tag closure
+          // Escape </script> tags to prevent premature script closure
           bundledCode = bundledCode.replace(/<\/script>/gi, '<\\/script>');
           
-          // Create inline script tag with the bundled code
-          // The bundled code already exports YAPLTranspiler, so we just need to ensure it's on window
-          // Check if it's already assigned to window, if not add it
-          if (!bundledCode.includes('window.YAPLTranspiler')) {
-            bundledCode += '\nwindow.YAPLTranspiler = YAPLTranspiler;';
-          }
-          const inlineScript = '<script>\n' + bundledCode + '\n</script>';
+          // Replace the external script tag with an inline module script
+          // This preserves ES module functionality while keeping everything in one file
+          const inlineScript = `<script type="module">\n${bundledCode}\n</script>`;
           
-          // Replace the module script tag with inline script
           html = html.replace(
             /<script type="module"[^>]*src="\/assets\/[^"]+\.js"[^>]*><\/script>/,
             inlineScript
@@ -161,6 +156,7 @@ export default defineConfig(({ command }) => {
           // Ensure HTML goes to the right place
           entryFileNames: 'assets/[name]-[hash].js',
         },
+        external: ['module'], // Node.js built-in, not needed in browser
       },
     },
     plugins: [inlineTranspilerPlugin()],

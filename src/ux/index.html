@@ -205,7 +205,7 @@
   </div>
 
   <script type="module" id="transpiler-loader">
-    // This will be replaced with inline transpiler code during build
+    // Import transpiler and assign to window
     import YAPLTranspiler from '../transpiler.js';
     window.YAPLTranspiler = YAPLTranspiler;
   </script>
@@ -241,7 +241,7 @@
       console.error = originalError;
     }
 
-    function runYAPL() {
+    async function runYAPL() {
       const editor = document.getElementById('editor');
       const javascript = document.getElementById('javascript');
       const output = document.getElementById('output');
@@ -261,7 +261,7 @@
         // Get the transpiled JavaScript code
         // Parse YAML first to get AST, then transpile
         const ast = jsyaml.load(code);
-        const jsCode = transpiler.transpile(ast);
+        const jsCode = await transpiler.transpile(ast);
         // Format the JavaScript code using js-beautify
         const formattedCode = typeof js_beautify !== 'undefined' 
           ? js_beautify(jsCode, { indent_size: 2, space_in_empty_paren: true })
@@ -269,7 +269,7 @@
         javascript.textContent = formattedCode;
         
         // Execute the code
-        const result = transpiler.run(code);
+        const result = await transpiler.run(code);
 
         restoreConsole();
 
