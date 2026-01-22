@@ -90,8 +90,8 @@ const inlineTranspilerPlugin = () => {
     
     const htmlFiles = findHtmlFiles(resolve(buildDir));
     
-    // Also check dist root and dist/ux explicitly
-    for (const checkDir of ['dist', 'dist/ux']) {
+    // Also check dist root explicitly
+    for (const checkDir of ['dist']) {
       const checkPath = resolve(checkDir);
       if (existsSync(checkPath)) {
         const found = findHtmlFiles(checkPath);
@@ -152,32 +152,6 @@ const inlineTranspilerPlugin = () => {
       }
     }
     
-    // Find the actual HTML file path (could be in subdirectories)
-    const findHtmlFile = (dir) => {
-      if (!existsSync(dir)) return null;
-      const files = readdirSync(dir);
-      for (const file of files) {
-        const fullPath = resolve(dir, file);
-        if (statSync(fullPath).isDirectory()) {
-          const found = findHtmlFile(fullPath);
-          if (found) return found;
-        } else if (file === 'index.html') {
-          return fullPath;
-        }
-      }
-      return null;
-    };
-    
-    // Copy the processed HTML to dist root for easy access
-    const mainHtmlPath = findHtmlFile(resolve(buildDir));
-    if (mainHtmlPath && existsSync(mainHtmlPath)) {
-      const distDir = resolve('dist');
-      if (!existsSync(distDir)) {
-        mkdirSync(distDir, { recursive: true });
-      }
-      writeFileSync(resolve(distDir, 'index.html'), readFileSync(mainHtmlPath, 'utf-8'));
-    }
-    
     // Clean up the assets directory since we inlined everything
     const assetsDir = resolve(buildDir, 'assets');
     if (existsSync(assetsDir)) {
@@ -221,7 +195,7 @@ export default defineConfig(({ command }) => {
     publicDir: false,
     base: '/',
     build: {
-      outDir: resolve('dist/ux'),  // Use absolute path so it's relative to project root, not vite root
+      outDir: resolve('dist'),  // Use absolute path so it's relative to project root, not vite root
       emptyOutDir: buildTarget !== 'library', // Only empty if not building library
       rollupOptions: {
         input: resolve('src/ux/index.html'),

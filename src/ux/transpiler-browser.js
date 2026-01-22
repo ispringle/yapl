@@ -5,6 +5,7 @@ class YAPLTranspiler {
   constructor() {
     this.functions = {};
     this.globals = {};
+    this.params = {};
   }
 
   // Main entry point
@@ -70,6 +71,12 @@ class YAPLTranspiler {
     
     this.functions[name] = true;
 
+    // Track parameters so they're treated as identifiers in the function body
+    const oldParams = { ...this.params };
+    params.forEach(param => {
+      this.params[param] = true;
+    });
+
     // Handle body - could be single expression or list
     let bodyCode;
     if (Array.isArray(body)) {
@@ -87,6 +94,9 @@ class YAPLTranspiler {
       bodyCode = `return ${this.transpileExpr(body)};`;
     }
 
+    // Restore previous params state
+    this.params = oldParams;
+
     return `function ${name}(${params.join(', ')}) {\n  ${bodyCode}\n}`;
   }
 
@@ -97,16 +107,17 @@ class YAPLTranspiler {
     }
 
     const results = entry.map(expr => this.transpileExpr(expr));
-    return `(() => {\n  ${results.map(r => `const _ = ${r};`).join('\n  ')}\n  return _;\n})();`;
+    if (results.length === 0) {
+      return `(() => { return null; })();`;
+    }
+    const statements = results.map((r, i) => 
+      i === 0 ? `let _ = ${r};` : `_ = ${r};`
+    );
+    return `(() => {\n  ${statements.join('\n  ')}\n  return _;\n})();`;
   }
 
   // Transpile expression to JavaScript
   transpileExpr(expr) {
-    // Handle primitives
-    if (this.isPrimitive(expr)) {
-      return JSON.stringify(expr);
-    }
-
     // Handle null/undefined
     if (expr === null || expr === undefined) {
       return 'null';
@@ -122,9 +133,21 @@ class YAPLTranspiler {
       return this.transpileObjectExpr(expr);
     }
 
-    // Handle variable/function reference (string)
+    // Handle variable/function reference (string) - check BEFORE primitives
+    // because identifiers are also strings, but shouldn't be JSON.stringify'd
     if (typeof expr === 'string') {
-      return this.transpileIdentifier(expr);
+      // Treat as identifier if it's registered as a function, global, or parameter
+      // This prevents string literals like "YAPL" from being treated as identifiers
+      if (this.functions[expr] || this.globals[expr] || this.params[expr]) {
+        return this.transpileIdentifier(expr);
+      }
+      // Otherwise treat as string literal
+      return JSON.stringify(expr);
+    }
+
+    // Handle primitives (numbers, booleans)
+    if (this.isPrimitive(expr)) {
+      return JSON.stringify(expr);
     }
 
     throw new Error(`Cannot transpile: ${JSON.stringify(expr)}`);
