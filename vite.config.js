@@ -4,24 +4,12 @@ import { resolve } from 'path';
 
 // Plugin to inline transpiler code and example.yapl into HTML
 const inlineTranspilerPlugin = () => {
-  let transpilerCode = null;
   let exampleCode = null;
   
   return {
     name: 'inline-transpiler',
     enforce: 'pre',
     buildStart() {
-      // Read the transpiler-browser.js source once at build start
-      const transpilerSource = readFileSync(
-        resolve('src/ux/transpiler-browser.js'),
-        'utf-8'
-      );
-      
-      // Remove the export statement
-      transpilerCode = transpilerSource
-        .replace(/export default YAPLTranspiler;?\s*$/, '')
-        .trim();
-      
       // Read example.yapl
       exampleCode = readFileSync(
         resolve('example.yapl'),
@@ -29,28 +17,6 @@ const inlineTranspilerPlugin = () => {
       ).trim();
     },
     transformIndexHtml(html) {
-      // Replace the transpiler-loader script with inline code
-      const inlineScript = `<script>\n${transpilerCode}\nwindow.YAPLTranspiler = YAPLTranspiler;\n</script>`;
-      
-      // Try multiple patterns - Vite might transform the script tag
-      // Pattern 1: Original script tag with id
-      html = html.replace(
-        /<script type="module"[^>]*id="transpiler-loader"[^>]*>[\s\S]*?<\/script>/,
-        inlineScript
-      );
-      
-      // Pattern 2: Module script that imports YAPLTranspiler
-      html = html.replace(
-        /<script type="module"[^>]*>[\s\S]*?import[\s\S]*?YAPLTranspiler[\s\S]*?<\/script>/,
-        inlineScript
-      );
-      
-      // Pattern 3: Module script with src pointing to bundled transpiler
-      html = html.replace(
-        /<script type="module"[^>]*src="\/assets\/[^"]+\.js"[^>]*><\/script>/,
-        inlineScript
-      );
-      
       // Replace example.yapl placeholder with actual content
       // Escape backticks and backslashes for template literal
       const escapedExampleCode = exampleCode
@@ -66,97 +32,89 @@ const inlineTranspilerPlugin = () => {
       return html;
     },
     writeBundle(options, bundle) {
-    // Find HTML files on disk and remove bundled JS references
-    const buildDir = options.dir || 'dist';
-    const findHtmlFiles = (dir) => {
-      if (!existsSync(dir)) return [];
-      const htmlFiles = [];
-      try {
-        const files = readdirSync(dir);
-        for (const file of files) {
-          const fullPath = resolve(dir, file);
-          const stat = statSync(fullPath);
-          if (stat.isDirectory()) {
-            htmlFiles.push(...findHtmlFiles(fullPath));
-          } else if (file.endsWith('.html')) {
-            htmlFiles.push(fullPath);
-          }
-        }
-      } catch (e) {
-        // Ignore errors
-      }
-      return htmlFiles;
-    };
-    
-    const htmlFiles = findHtmlFiles(resolve(buildDir));
-    
-    // Also check dist root explicitly
-    for (const checkDir of ['dist']) {
-      const checkPath = resolve(checkDir);
-      if (existsSync(checkPath)) {
-        const found = findHtmlFiles(checkPath);
-        htmlFiles.push(...found.filter(f => !htmlFiles.includes(f)));
-      }
-    }
-    
-    // Process each HTML file - add inline transpiler if missing, remove bundled JS
-    const inlineScript = `<script>\n${transpilerCode}\nwindow.YAPLTranspiler = YAPLTranspiler;\n</script>`;
-    
-    // Escape example code for template literal
-    const escapedExampleCode = exampleCode
-      .replace(/\\/g, '\\\\')
-      .replace(/`/g, '\\`')
-      .replace(/\${/g, '\\${');
-    
-    for (const htmlPath of htmlFiles) {
-      if (!existsSync(htmlPath)) continue;
+      // Read source HTML to get js-yaml script and styles
+      const sourceHtmlPath = resolve('src/ux/index.html');
+      if (!existsSync(sourceHtmlPath)) return;
+      
+      const sourceHtml = readFileSync(sourceHtmlPath, 'utf-8');
+      const jsyamlScriptMatch = sourceHtml.match(/<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/js-yaml@[^"]+"><\/script>/);
+      const styleMatch = sourceHtml.match(/<style>([\s\S]*?)<\/style>/);
+      
+      if (!jsyamlScriptMatch || !styleMatch) return;
+      
+      // Find HTML file in dist
+      const htmlPath = resolve('dist/index.html');
+      if (!existsSync(htmlPath)) return;
       
       let html = readFileSync(htmlPath, 'utf-8');
       let modified = false;
       
-      // Check if transpiler is already inlined
-      const hasTranspiler = html.includes('class YAPLTranspiler') || html.includes('window.YAPLTranspiler = YAPLTranspiler');
-      
-      if (!hasTranspiler) {
-        // Find where to insert - before the first <script> tag that's not the CDN one
-        const scriptMatch = html.match(/<script[^>]*>(?![\s\S]*js-yaml)/);
-        if (scriptMatch && scriptMatch.index !== undefined) {
-          html = html.slice(0, scriptMatch.index) + inlineScript + '\n  ' + html.slice(scriptMatch.index);
-          modified = true;
-        } else {
-          // Insert before </body>
-          html = html.replace('</body>', inlineScript + '\n</body>');
+      // Find the bundled transpiler JS file and inline it
+      const scriptTagMatch = html.match(/<script type="module"[^>]*src="\/assets\/([^"]+\.js)"[^>]*><\/script>/);
+      if (scriptTagMatch) {
+        const bundledJsFile = scriptTagMatch[1];
+        const bundledJsPath = resolve('dist/assets', bundledJsFile);
+        
+        if (existsSync(bundledJsPath)) {
+          // Read the bundled JS file (Vite has already processed it correctly)
+          let bundledCode = readFileSync(bundledJsPath, 'utf-8');
+          
+          // Only escape </script> tags to prevent premature script tag closure
+          bundledCode = bundledCode.replace(/<\/script>/gi, '<\\/script>');
+          
+          // Create inline script tag with the bundled code
+          // The bundled code already exports YAPLTranspiler, so we just need to ensure it's on window
+          // Check if it's already assigned to window, if not add it
+          if (!bundledCode.includes('window.YAPLTranspiler')) {
+            bundledCode += '\nwindow.YAPLTranspiler = YAPLTranspiler;';
+          }
+          const inlineScript = '<script>\n' + bundledCode + '\n</script>';
+          
+          // Replace the module script tag with inline script
+          html = html.replace(
+            /<script type="module"[^>]*src="\/assets\/[^"]+\.js"[^>]*><\/script>/,
+            inlineScript
+          );
           modified = true;
         }
       }
       
-      // Replace example.yapl placeholder with actual content
-      if (html.includes('<!-- EXAMPLE_PLACEHOLDER -->')) {
-        html = html.replace(
-          /const defaultCode = `<!-- EXAMPLE_PLACEHOLDER -->`;/,
-          `const defaultCode = \`${escapedExampleCode}\`;`
-        );
-        modified = true;
+      // Ensure js-yaml script is present
+      if (!html.includes('js-yaml@4.1.0')) {
+        const titleEndIndex = html.indexOf('</title>');
+        if (titleEndIndex !== -1) {
+          html = html.slice(0, titleEndIndex + 8) + '\n  ' + jsyamlScriptMatch[0] + html.slice(titleEndIndex + 8);
+          modified = true;
+        }
       }
       
-      // Remove the bundled module script tag (Vite bundles the import)
-      const beforeRemove = html;
-      html = html.replace(
-        /<script type="module"[^>]*src="\/assets\/[^"]+\.js"[^>]*><\/script>/g,
-        ''
-      );
-      if (html !== beforeRemove) modified = true;
+      // Ensure style tag is present
+      if (!html.includes('<style>')) {
+        const jsyamlIndex = html.indexOf('js-yaml.min.js');
+        if (jsyamlIndex !== -1) {
+          const scriptEndIndex = html.indexOf('</script>', jsyamlIndex);
+          if (scriptEndIndex !== -1) {
+            html = html.slice(0, scriptEndIndex + 9) + '\n  <style>' + styleMatch[1] + '</style>' + html.slice(scriptEndIndex + 9);
+            modified = true;
+          }
+        } else {
+          const titleEndIndex = html.indexOf('</title>');
+          if (titleEndIndex !== -1) {
+            html = html.slice(0, titleEndIndex + 8) + '\n  <style>' + styleMatch[1] + '</style>' + html.slice(titleEndIndex + 8);
+            modified = true;
+          }
+        }
+      }
       
       if (modified) {
         writeFileSync(htmlPath, html);
       }
-    }
-    
-    // Clean up the assets directory since we inlined everything
-    const assetsDir = resolve(buildDir, 'assets');
-    if (existsSync(assetsDir)) {
-      rmSync(assetsDir, { recursive: true, force: true });
-    }
+      
+      // Clean up assets directory after inlining
+      const assetsDir = resolve('dist/assets');
+      if (existsSync(assetsDir)) {
+        rmSync(assetsDir, { recursive: true, force: true });
+      }
     },
   };
 };
