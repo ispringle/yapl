@@ -47,8 +47,8 @@ globals:
   - name: pi
     value: 3.14159
 
-# Entry point - code executed when program runs
-entry:
+# Main entry point - code executed when program runs
+main:
   # Greet the user
   - [greet, "YAPL"]
   

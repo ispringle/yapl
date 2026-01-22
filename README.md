@@ -78,7 +78,7 @@ npm run typecheck
 
 - `functions`: List of function definitions
 - `globals`: List of global variable declarations
-- `entry`: Main execution point (list of steps)
+- `main`: Main execution point (list of steps)
 - `imports`: List of external file paths (optional, for future expansion)
 
 ### Function Definition
@@ -150,10 +150,10 @@ Any identifier that isn't a YAPL function or global is treated as a JavaScript g
 
 Example:
 ```yaml
-entry:
-  - [console.log, "Hello from JavaScript!"]
-  - [Math.max, 1, 2, 3, 4, 5]
-  - [Date.now]
+main:
+  - [.console.log, "Hello from JavaScript!"]
+  - [.Math.max, 1, 2, 3, 4, 5]
+  - [.Date.now]
 ```
 
 ## Examples

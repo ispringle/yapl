@@ -37,7 +37,7 @@ function getYamlLib() {
  * @property {string[]} [imports] - List of import paths
  * @property {GlobalDef[]} [globals] - List of global variable definitions
  * @property {FunctionDef[]} [functions] - List of function definitions
- * @property {Expr | Expr[]} [entry] - Entry point expression(s)
+ * @property {Expr | Expr[]} [main] - Main entry point expression(s)
  */
 
 /**
@@ -165,10 +165,10 @@ class YAPLTranspiler {
       functions.push(...ast.functions.map(f => this.transpileFunction(f)));
     }
 
-    // Transpile entry point
+    // Transpile main entry point
     let entryCode = '';
-    if (ast.entry) {
-      entryCode = this.transpileEntryBody(ast.entry);
+    if (ast.main) {
+      entryCode = this.transpileEntryBody(ast.main);
     }
 
     // Build code without outer IIFE wrapper - globals and functions at top level

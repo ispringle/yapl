@@ -11,7 +11,7 @@ describe('YAPLTranspiler', () => {
   describe('Basic arithmetic', () => {
     it('should handle addition', () => {
       const code = `
-entry:
+main:
   - ['+', 2, 3]
 `;
       const result = transpiler.run(code);
@@ -20,7 +20,7 @@ entry:
 
     it('should handle subtraction', () => {
       const code = `
-entry:
+main:
   - ['-', 10, 3]
 `;
       const result = transpiler.run(code);
@@ -29,7 +29,7 @@ entry:
 
     it('should handle multiplication', () => {
       const code = `
-entry:
+main:
   - ['*', 4, 5]
 `;
       const result = transpiler.run(code);
@@ -38,7 +38,7 @@ entry:
 
     it('should handle division', () => {
       const code = `
-entry:
+main:
   - ['/', 15, 3]
 `;
       const result = transpiler.run(code);
@@ -47,7 +47,7 @@ entry:
 
     it('should handle multiple operations', () => {
       const code = `
-entry:
+main:
   - ['+', ['*', 2, 3], ['-', 10, 4]]
 `;
       const result = transpiler.run(code);
@@ -58,7 +58,7 @@ entry:
   describe('Comparisons', () => {
     it('should handle less than', () => {
       const code = `
-entry:
+main:
   - ['<', 5, 10]
 `;
       const result = transpiler.run(code);
@@ -67,7 +67,7 @@ entry:
 
     it('should handle greater than', () => {
       const code = `
-entry:
+main:
   - ['>', 10, 5]
 `;
       const result = transpiler.run(code);
@@ -76,7 +76,7 @@ entry:
 
     it('should handle equality', () => {
       const code = `
-entry:
+main:
   - ['==', 5, 5]
 `;
       const result = transpiler.run(code);
@@ -85,7 +85,7 @@ entry:
 
     it('should handle inequality', () => {
       const code = `
-entry:
+main:
   - ['!=', 5, 10]
 `;
       const result = transpiler.run(code);
@@ -102,7 +102,7 @@ functions:
     body:
       - ['+', a, b]
 
-entry:
+main:
   - [add, 3, 4]
 `;
       const result = transpiler.run(code);
@@ -121,7 +121,7 @@ functions:
           else:
             ['*', n, [factorial, ['-', n, 1]]]
 
-entry:
+main:
   - [factorial, 5]
 `;
       const result = transpiler.run(code);
@@ -142,7 +142,7 @@ functions:
              [fib, ['-', n, 1]],
              [fib, ['-', n, 2]]]
 
-entry:
+main:
   - [fib, 10]
 `;
       const result = transpiler.run(code);
@@ -153,7 +153,7 @@ entry:
   describe('Conditionals', () => {
     it('should handle if-then-else', () => {
       const code = `
-entry:
+main:
   - if:
       cond: ['<', 5, 10]
       then: "yes"
@@ -165,7 +165,7 @@ entry:
 
     it('should handle if-then-else with false condition', () => {
       const code = `
-entry:
+main:
   - if:
       cond: ['>', 5, 10]
       then: "yes"
@@ -183,7 +183,7 @@ globals:
   - name: x
     value: 42
 
-entry:
+main:
   - x
 `;
       const result = transpiler.run(code);
@@ -196,7 +196,7 @@ globals:
   - name: pi
     value: 3.14159
 
-entry:
+main:
   - ['*', pi, 2]
 `;
       const result = transpiler.run(code);
@@ -207,7 +207,7 @@ entry:
   describe('JavaScript integration', () => {
     it('should call JavaScript Math functions', () => {
       const code = `
-entry:
+main:
   - [Math.max, 1, 2, 3, 4, 5]
 `;
       const result = transpiler.run(code);
@@ -216,7 +216,7 @@ entry:
 
     it('should call JavaScript Math.min', () => {
       const code = `
-entry:
+main:
   - [Math.min, 10, 5, 3, 8]
 `;
       const result = transpiler.run(code);
@@ -227,7 +227,7 @@ entry:
   describe('Arrays', () => {
     it('should handle array literals', () => {
       const code = `
-entry:
+main:
   - [1, 2, 3]
 `;
       const result = transpiler.run(code);
@@ -236,7 +236,7 @@ entry:
 
     it('should handle empty arrays', () => {
       const code = `
-entry:
+main:
   - []
 `;
       const result = transpiler.run(code);
@@ -247,7 +247,7 @@ entry:
   describe('Multiple entry statements', () => {
     it('should execute multiple statements and return last', () => {
       const code = `
-entry:
+main:
   - ['+', 1, 1]
   - ['+', 2, 2]
   - ['+', 3, 3]
@@ -260,7 +260,7 @@ entry:
   describe('Logical operators', () => {
     it('should handle AND', () => {
       const code = `
-entry:
+main:
   - ['&&', true, true]
 `;
       const result = transpiler.run(code);
@@ -269,7 +269,7 @@ entry:
 
     it('should handle OR', () => {
       const code = `
-entry:
+main:
   - ['||', false, true]
 `;
       const result = transpiler.run(code);
@@ -278,7 +278,7 @@ entry:
 
     it('should handle NOT', () => {
       const code = `
-entry:
+main:
   - ['!', false]
 `;
       const result = transpiler.run(code);
