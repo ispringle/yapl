@@ -325,8 +325,98 @@
       return div.innerHTML;
     }
 
+    // Auto-indentation for YAML syntax
+    function setupYAMLAutoIndent() {
+      const editor = document.getElementById('editor');
+      
+      editor.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          
+          const textarea = e.target;
+          const start = textarea.selectionStart;
+          const end = textarea.selectionEnd;
+          const text = textarea.value;
+          
+          // Get the current line
+          const lineStart = text.lastIndexOf('\n', start - 1) + 1;
+          const currentLine = text.substring(lineStart, start);
+          
+          // Calculate current indentation
+          const indentMatch = currentLine.match(/^(\s*)/);
+          const currentIndent = indentMatch ? indentMatch[1] : '';
+          
+          // Determine new indentation based on YAML syntax
+          let newIndent = currentIndent;
+          
+          // Check if current line ends with a colon (key-value pair)
+          if (currentLine.trim().endsWith(':')) {
+            // Increase indentation by 2 spaces
+            newIndent = currentIndent + '  ';
+          }
+          // Check if current line is a list item (starts with -)
+          else if (currentLine.trim().startsWith('-')) {
+            // Check if it's a list item with a colon (like "- name:")
+            if (currentLine.includes(':')) {
+              // Increase indentation by 2 spaces
+              newIndent = currentIndent + '  ';
+            } else {
+              // Regular list item, maintain same indentation
+              newIndent = currentIndent;
+            }
+          }
+          
+          // Insert newline with indentation
+          const newText = text.substring(0, start) + '\n' + newIndent + text.substring(end);
+          textarea.value = newText;
+          
+          // Set cursor position after the indentation
+          const newCursorPos = start + 1 + newIndent.length;
+          textarea.setSelectionRange(newCursorPos, newCursorPos);
+        }
+        // Handle Tab key for indentation
+        else if (e.key === 'Tab') {
+          e.preventDefault();
+          
+          const textarea = e.target;
+          const start = textarea.selectionStart;
+          const end = textarea.selectionEnd;
+          const text = textarea.value;
+          
+          if (e.shiftKey) {
+            // Shift+Tab: Unindent
+            const lineStart = text.lastIndexOf('\n', start - 1) + 1;
+            const lineEnd = text.indexOf('\n', end);
+            const actualLineEnd = lineEnd === -1 ? text.length : lineEnd;
+            const line = text.substring(lineStart, actualLineEnd);
+            
+            if (line.startsWith('  ')) {
+              const newText = text.substring(0, lineStart) + line.substring(2) + text.substring(actualLineEnd);
+              textarea.value = newText;
+              const newStart = Math.max(start - 2, lineStart);
+              const newEnd = Math.max(end - 2, lineStart);
+              textarea.setSelectionRange(newStart, newEnd);
+            }
+          } else {
+            // Tab: Indent
+            const lineStart = text.lastIndexOf('\n', start - 1) + 1;
+            const lineEnd = text.indexOf('\n', end);
+            const actualLineEnd = lineEnd === -1 ? text.length : lineEnd;
+            const line = text.substring(lineStart, actualLineEnd);
+            
+            const newText = text.substring(0, lineStart) + '  ' + line + text.substring(actualLineEnd);
+            textarea.value = newText;
+            textarea.setSelectionRange(start + 2, end + 2);
+          }
+        }
+      });
+    }
+
     // Load default example on page load
     document.getElementById('editor').value = defaultCode;
+    
+    // Setup auto-indentation
+    setupYAMLAutoIndent();
   </script>
 </body>
 </html>
