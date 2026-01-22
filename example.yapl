@@ -1,5 +1,26 @@
 # YAPL Example - Demonstrates functions, globals, and JavaScript integration
 
+# ES6 imports (optional) - structured format similar to functions
+# imports:
+#   - from: 'fs'
+#     default: fs
+#   - from: 'fs/promises'
+#     named: [readFile, writeFile]
+#   - from: 'path'
+#     alias: path  # Creates: import * as path from 'path'
+#   - from: 'fs'
+#     default: fs
+#     named: [readFileSync]  # Can combine default and named
+
+# CommonJS require statements (optional) - structured format
+# require:
+#   - module: 'fs'
+#     default: fs
+#   - module: 'util'
+#     named: [promisify]
+#   - module: 'path'
+#     alias: path  # Creates: const path = require('path')
+
 functions:
   # Recursive Fibonacci function
   # Returns the nth Fibonacci number

@@ -33,8 +33,25 @@ function getYamlLib() {
 }
 
 /**
+ * @typedef {Object} ImportDef
+ * @property {string} from - Module path to import from
+ * @property {string} [default] - Default import name (e.g., "fs" for `import fs from 'fs'`)
+ * @property {string[]} [named] - Named imports (e.g., ["readFile", "writeFile"] for `import { readFile, writeFile } from 'fs'`)
+ * @property {string} [alias] - Namespace import alias (e.g., "path" for `import * as path from 'path'`)
+ */
+
+/**
+ * @typedef {Object} RequireDef
+ * @property {string} module - Module path to require
+ * @property {string} [default] - Default require name (e.g., "fs" for `const fs = require('fs')`)
+ * @property {string[]} [named] - Named destructured imports (e.g., ["readFile"] for `const { readFile } = require('fs')`)
+ * @property {string} [alias] - Namespace require alias (e.g., "path" for `const path = require('path')`)
+ */
+
+/**
  * @typedef {Object} YAPLAST
- * @property {string[]} [imports] - List of import paths
+ * @property {ImportDef[]} [imports] - List of ES6 import definitions
+ * @property {RequireDef[]} [require] - List of CommonJS require definitions
  * @property {GlobalDef[]} [globals] - List of global variable definitions
  * @property {FunctionDef[]} [functions] - List of function definitions
  * @property {Expr | Expr[]} [main] - Main entry point expression(s)
@@ -148,9 +165,32 @@ class YAPLTranspiler {
     /** @type {string[]} */
     const parts = [];
 
-    // Handle imports (for future expansion)
-    if (ast.imports) {
-      parts.push(`// Imports: ${ast.imports.join(', ')}`);
+    // Handle ES6 imports - must be at the top
+    if (ast.imports && Array.isArray(ast.imports)) {
+      ast.imports.forEach(importDef => {
+        const importCode = this.transpileImport(importDef);
+        if (importCode) {
+          parts.push(importCode);
+        }
+      });
+      // Add blank line after imports
+      if (ast.imports.length > 0) {
+        parts.push('');
+      }
+    }
+
+    // Handle CommonJS require statements - typically at the top after imports
+    if (ast.require && Array.isArray(ast.require)) {
+      ast.require.forEach(requireDef => {
+        const requireCode = this.transpileRequire(requireDef);
+        if (requireCode) {
+          parts.push(requireCode);
+        }
+      });
+      // Add blank line after requires
+      if (ast.require.length > 0) {
+        parts.push('');
+      }
     }
 
     // Transpile globals
@@ -195,6 +235,93 @@ class YAPLTranspiler {
     parts.push('main()');
 
     return parts.join('\n');
+  }
+
+  /**
+   * Transpiles an ES6 import definition.
+   * @param {ImportDef} importDef - Import definition
+   * @returns {string} JavaScript ES6 import statement
+   * @throws {Error} If the import definition is invalid
+   */
+  transpileImport(importDef) {
+    if (typeof importDef === 'string') {
+      // Backward compatibility: if it's a string, use it as-is
+      return importDef;
+    }
+
+    if (!importDef.from) {
+      throw new Error('Import definition must have a "from" property');
+    }
+
+    const from = importDef.from;
+    const parts = [];
+
+    // Handle default import
+    if (importDef.default) {
+      parts.push(importDef.default);
+    }
+
+    // Handle named imports
+    if (importDef.named && Array.isArray(importDef.named) && importDef.named.length > 0) {
+      const namedImports = importDef.named.join(', ');
+      if (parts.length > 0) {
+        parts.push(`{ ${namedImports} }`);
+      } else {
+        parts.push(`{ ${namedImports} }`);
+      }
+    }
+
+    // Handle namespace alias (import * as alias)
+    if (importDef.alias) {
+      if (parts.length > 0) {
+        throw new Error('Cannot mix default/named imports with alias in the same import statement');
+      }
+      parts.push(`* as ${importDef.alias}`);
+    }
+
+    if (parts.length === 0) {
+      throw new Error('Import definition must have at least one of: default, named, or alias');
+    }
+
+    return `import ${parts.join(', ')} from '${from}';`;
+  }
+
+  /**
+   * Transpiles a CommonJS require definition.
+   * @param {RequireDef} requireDef - Require definition
+   * @returns {string} JavaScript CommonJS require statement
+   * @throws {Error} If the require definition is invalid
+   */
+  transpileRequire(requireDef) {
+    if (typeof requireDef === 'string') {
+      // Backward compatibility: if it's a string, use it as-is
+      return requireDef;
+    }
+
+    if (!requireDef.module) {
+      throw new Error('Require definition must have a "module" property');
+    }
+
+    const module = requireDef.module;
+    const requireExpr = `require('${module}')`;
+
+    // Handle default require
+    if (requireDef.default) {
+      return `const ${requireDef.default} = ${requireExpr};`;
+    }
+
+    // Handle named destructured imports
+    if (requireDef.named && Array.isArray(requireDef.named) && requireDef.named.length > 0) {
+      const namedImports = requireDef.named.join(', ');
+      return `const { ${namedImports} } = ${requireExpr};`;
+    }
+
+    // Handle namespace alias
+    if (requireDef.alias) {
+      return `const ${requireDef.alias} = ${requireExpr};`;
+    }
+
+    throw new Error('Require definition must have at least one of: default, named, or alias');
   }
 
   /**
