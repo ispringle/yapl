@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>YAPL - Yet Another Programming Language</title>
   <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/js-beautify@1.14.11/js/lib/beautify.js"></script>
   <style>
     * {
       margin: 0;
@@ -261,7 +262,11 @@
         // Parse YAML first to get AST, then transpile
         const ast = jsyaml.load(code);
         const jsCode = transpiler.transpile(ast);
-        javascript.textContent = jsCode;
+        // Format the JavaScript code using js-beautify
+        const formattedCode = typeof js_beautify !== 'undefined' 
+          ? js_beautify(jsCode, { indent_size: 2, space_in_empty_paren: true })
+          : jsCode;
+        javascript.textContent = formattedCode;
         
         // Execute the code
         const result = transpiler.run(code);
@@ -306,7 +311,11 @@
           output.innerHTML += `<div class="error" style="margin-top: 0.5rem; font-size: 0.9rem;">${escapeHtml(error.stack)}</div>`;
         }
         // Show error in JavaScript pane too
-        javascript.textContent = `// Error transpiling code:\n// ${error.message}`;
+        const errorCode = `// Error transpiling code:\n// ${error.message}`;
+        const formattedErrorCode = typeof js_beautify !== 'undefined'
+          ? js_beautify(errorCode, { indent_size: 2, space_in_empty_paren: true })
+          : errorCode;
+        javascript.textContent = formattedErrorCode;
       }
     }
 
