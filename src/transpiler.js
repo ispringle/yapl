@@ -1,6 +1,36 @@
 // YAPL Transpiler - Converts YAPL to JavaScript and executes with eval
 
-import yaml from 'js-yaml';
+// Import for Node.js - this import statement will be removed when inlining for browser
+// @ts-ignore - Browser build will replace this
+import yamlModule from 'js-yaml';
+
+/**
+ * @typedef {Object} JsYamlLib
+ * @property {function(string): *} load
+ */
+
+/**
+ * Gets the YAML parser library, supporting both Node.js and browser environments.
+ * @returns {JsYamlLib} The YAML parser library
+ */
+function getYamlLib() {
+  // Try imported module first (Node.js)
+  if (typeof yamlModule !== 'undefined' && yamlModule) {
+    return yamlModule;
+  }
+  // Otherwise, try global jsyaml (browser CDN)
+  // @ts-ignore - Global variable from CDN
+  if (typeof jsyaml !== 'undefined') {
+    // @ts-ignore
+    return jsyaml;
+  }
+  // @ts-ignore - Global variable from CDN (alternative name)
+  if (typeof jsYAML !== 'undefined') {
+    // @ts-ignore
+    return jsYAML;
+  }
+  throw new Error('js-yaml library not loaded. Make sure it is included via CDN in browser or installed as a dependency in Node.js.');
+}
 
 /**
  * @typedef {Object} YAPLAST
@@ -44,15 +74,16 @@ import yaml from 'js-yaml';
 
 /**
  * @typedef {Object} LetExprArray
- * @property {LetExpr[]} - Array of let bindings
+ * @property {LetExpr[]} bindings - Array of let bindings
  */
 
 /**
- * @typedef {string | number | boolean | null | Expr[] | ObjectExpr} Expr
+ * @typedef {string | number | boolean | null | any[] | ObjectExpr} Expr
+ * Note: Using any[] instead of Expr[] to avoid circular reference warning
  */
 
 /**
- * @typedef {IfForm | WhileForm | LetForm | ReturnForm | Record<string, Expr>} ObjectExpr
+ * @typedef {IfForm | WhileForm | LetForm | ReturnForm | Record<string, any>} ObjectExpr
  */
 
 /**
@@ -97,8 +128,9 @@ class YAPLTranspiler {
    * @returns {*} The result of executing the transpiled code
    */
   run(yamlContent) {
+    const yamlLib = getYamlLib();
     /** @type {YAPLAST} */
-    const ast = yaml.load(yamlContent);
+    const ast = yamlLib.load(yamlContent);
     
     // Process AST
     const jsCode = this.transpile(ast);
@@ -139,14 +171,30 @@ class YAPLTranspiler {
       entryCode = this.transpileEntryBody(ast.entry);
     }
 
-    // Wrap everything in an IIFE so globals, functions, and entry are in the same scope
-    const bodyParts = [
-      ...globals.map(g => this.indent(g, 2)),
-      ...functions.map(f => this.indent(f, 2)),
-      entryCode ? entryCode : this.indent('return null;', 2)
-    ].filter(Boolean);
+    // Build code without outer IIFE wrapper - globals and functions at top level
+    // Add globals at top level
+    if (globals.length > 0) {
+      parts.push(...globals);
+    }
+    
+    // Add functions at top level
+    if (functions.length > 0) {
+      parts.push(...functions);
+    }
+    
+    // Define main function and call it
+    if (entryCode) {
+      // Remove indentation from entry code since it's no longer nested
+      const unindentedEntry = entryCode.split('\n').map(line => line.replace(/^  /, '')).join('\n');
+      parts.push(`function main() {\n${unindentedEntry}\n}`);
+    } else {
+      parts.push('function main() {\n  return null;\n}');
+    }
+    
+    // Call the main function
+    parts.push('main()');
 
-    return `(() => {\n${bodyParts.join('\n')}\n})()`;
+    return parts.join('\n');
   }
 
   /**
@@ -357,7 +405,8 @@ class YAPLTranspiler {
     }
 
     // Function call - first element is function name
-    const funcName = this.transpileIdentifier(first);
+    // @ts-ignore - first is checked to be string before this point
+    const funcName = this.transpileIdentifier(/** @type {string} */ (first));
     // Arguments don't need parentheses unless they contain operators with lower precedence
     const args = rest.map(arg => this.transpileExpr(arg, 0));
     return this.maybeParenthesize(`${funcName}(${args.join(', ')})`, precedence, 20);
@@ -374,32 +423,42 @@ class YAPLTranspiler {
    */
   transpileObjectExpr(expr, precedence = 0) {
     // if statement
+    // @ts-ignore - Type guard for IfForm
     if (expr.if) {
-      const cond = this.transpileExpr(expr.if.cond, 0);
-      const thenExpr = this.transpileExpr(expr.if.then, 0);
-      const elseExpr = expr.if.else !== undefined 
-        ? this.transpileExpr(expr.if.else, 0)
+      // @ts-ignore
+      const ifExpr = expr.if;
+      const cond = this.transpileExpr(ifExpr.cond, 0);
+      const thenExpr = this.transpileExpr(ifExpr.then, 0);
+      const elseExpr = ifExpr.else !== undefined 
+        ? this.transpileExpr(ifExpr.else, 0)
         : 'null';
       return this.maybeParenthesize(`${cond} ? ${thenExpr} : ${elseExpr}`, precedence, 3);
     }
 
     // while loop
+    // @ts-ignore - Type guard for WhileForm
     if (expr.while) {
-      const cond = this.transpileExpr(expr.while.cond, 0);
-      const body = Array.isArray(expr.while.body)
-        ? expr.while.body.map(s => this.transpileExpr(s, 0)).join(';\n      ')
-        : this.transpileExpr(expr.while.body, 0);
+      // @ts-ignore
+      const whileExpr = expr.while;
+      const cond = this.transpileExpr(whileExpr.cond, 0);
+      const body = Array.isArray(whileExpr.body)
+        ? whileExpr.body.map((/** @type {Expr} */ s) => this.transpileExpr(s, 0)).join(';\n      ')
+        : this.transpileExpr(whileExpr.body, 0);
       const bodyIndented = this.indent(body, 6);
       return `(() => {\n    while (${cond}) {\n      ${bodyIndented};\n    }\n  })()`;
     }
 
     // let binding
+    // @ts-ignore - Type guard for LetForm
     if (expr.let) {
+      // @ts-ignore
       return this.transpileLet(expr.let, precedence);
     }
 
     // return statement
+    // @ts-ignore - Type guard for ReturnForm
     if (expr.return !== undefined) {
+      // @ts-ignore
       return this.transpileExpr(expr.return, 0);
     }
 
@@ -418,10 +477,12 @@ class YAPLTranspiler {
    * @throws {Error} If the let form is invalid
    */
   transpileLet(letExpr, precedence = 0) {
-    if (typeof letExpr === 'object' && letExpr.name) {
+    if (typeof letExpr === 'object' && letExpr !== null && !Array.isArray(letExpr) && letExpr.name) {
       // Single binding
-      const name = letExpr.name;
-      const value = this.transpileExpr(letExpr.value, 0);
+      /** @type {LetExpr} */
+      const singleLet = letExpr;
+      const name = singleLet.name;
+      const value = this.transpileExpr(singleLet.value, 0);
       return this.maybeParenthesize(`(() => {\n    let ${name} = ${value};\n    return ${name};\n  })()`, precedence, 0);
     } else if (Array.isArray(letExpr)) {
       // Multiple bindings
@@ -445,6 +506,7 @@ class YAPLTranspiler {
    */
   transpileOperator(op, args, precedence = 0) {
     // Operator precedence levels (higher = tighter binding)
+    /** @type {Record<string, number>} */
     const PREC = {
       '||': 1,
       '&&': 2,
@@ -716,7 +778,9 @@ class YAPLTranspiler {
     try {
       return eval(jsCode);
     } catch (error) {
+      // @ts-ignore - console is available in both Node.js and browser environments
       console.error('Generated JavaScript:');
+      // @ts-ignore
       console.error(jsCode);
       throw error;
     }
