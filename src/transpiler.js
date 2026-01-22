@@ -323,6 +323,25 @@ class YAPLTranspiler {
   }
 
   /**
+   * Checks if a string is a JavaScript identifier prefixed with a dot (e.g., ".Math.PI", ".true").
+   * The dot prefix explicitly marks JavaScript identifiers, allowing strings with periods to work.
+   * @param {string} str - String to check
+   * @returns {string|null} The identifier without the dot prefix, or null if not a dot-prefixed identifier
+   */
+  getJavaScriptIdentifier(str) {
+    // If string starts with a dot, treat the rest as a JavaScript identifier
+    if (str.startsWith('.')) {
+      const identifier = str.slice(1);
+      // Validate that the rest is a valid JavaScript identifier
+      const identifierPattern = /^[a-zA-Z_$][a-zA-Z0-9_$]*(\.[a-zA-Z_$][a-zA-Z0-9_$]*)*$/;
+      if (identifierPattern.test(identifier)) {
+        return identifier;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Transpiles an expression to JavaScript code.
    * @param {Expr} expr - Expression to transpile
    * @param {number} precedence - Current operator precedence (higher = tighter binding)
@@ -349,9 +368,14 @@ class YAPLTranspiler {
     // because identifiers are also strings, but shouldn't be JSON.stringify'd
     if (typeof expr === 'string') {
       // Treat as identifier if it's registered as a function, global, or parameter
-      // This prevents string literals like "YAPL" from being treated as identifiers
       if (this.functions[expr] || this.globals[expr] || this.params[expr]) {
         return this.transpileIdentifier(expr);
+      }
+      // Check if it's a dot-prefixed JavaScript identifier (e.g., ".Math.PI", ".true")
+      // The dot prefix explicitly marks JavaScript identifiers
+      const jsIdentifier = this.getJavaScriptIdentifier(expr);
+      if (jsIdentifier !== null) {
+        return this.transpileIdentifier(jsIdentifier);
       }
       // Otherwise treat as string literal
       return JSON.stringify(expr);
@@ -406,7 +430,10 @@ class YAPLTranspiler {
 
     // Function call - first element is function name
     // @ts-ignore - first is checked to be string before this point
-    const funcName = this.transpileIdentifier(/** @type {string} */ (first));
+    const firstStr = /** @type {string} */ (first);
+    // Check if it's a dot-prefixed JavaScript identifier and strip the dot
+    const jsIdentifier = this.getJavaScriptIdentifier(firstStr);
+    const funcName = this.transpileIdentifier(jsIdentifier !== null ? jsIdentifier : firstStr);
     // Arguments don't need parentheses unless they contain operators with lower precedence
     const args = rest.map(arg => this.transpileExpr(arg, 0));
     return this.maybeParenthesize(`${funcName}(${args.join(', ')})`, precedence, 20);

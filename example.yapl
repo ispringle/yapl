@@ -16,10 +16,11 @@ functions:
              [fib, ['-', n, 2]]]
 
   # Simple greeting function using JavaScript console.log
+  # Note: Use .console.log to access JavaScript's console.log (dot prefix marks JS identifiers)
   - name: greet
     params: [name]
     body:
-      - [console.log, ['+', "Hello, ", name, "!"]]
+      - [.console.log, ['+', "Hello, ", name, "!"]]
 
   # Recursive factorial function using block style YAML
   # Returns n! (n factorial)
@@ -57,16 +58,18 @@ entry:
       value: [fib, 10]
   
   # Log the result
-  - [console.log, fibResult]
+  # Note: Use .console.log to access JavaScript's console.log
+  - [.console.log, fibResult]
   
   # Use global variable and JavaScript Math operations
-  - [console.log, ['*', pi, 2]]  # Calculate 2π
+  - [.console.log, ['*', pi, 2]]  # Calculate 2π
   
   # Call JavaScript built-in function
-  - [Math.max, 1, 2, 3, 4, 5]
+  # Note: Use .Math.max to access JavaScript's Math.max
+  - [.Math.max, 1, 2, 3, 4, 5]
   
   # Calculate and display factorial using block style
-  - - console.log
+  - - .console.log
     - - '+'
       - "Factorial of 5: "
       - - factorial
