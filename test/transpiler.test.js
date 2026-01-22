@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import YAPLTranspiler from '../src/transpiler.js';
 
 describe('YAPLTranspiler', () => {
+  /** @type {YAPLTranspiler} */
   let transpiler;
 
   beforeEach(() => {
