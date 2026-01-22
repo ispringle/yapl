@@ -129,28 +129,33 @@ function getYamlLib() {
 class YAPLTranspiler {
   /**
    * Creates a new YAPL transpiler instance.
+   * @param {string} [baseDir] - Base directory for resolving relative YAPL file imports
    */
-  constructor() {
+  constructor(baseDir = '.') {
     /** @type {Record<string, boolean>} */
     this.functions = {};
     /** @type {Record<string, boolean>} */
     this.globals = {};
     /** @type {Record<string, boolean>} */
     this.params = {};
+    /** @type {string} */
+    this.baseDir = baseDir;
+    /** @type {Map<string, string>} */
+    this.importedModules = new Map();
   }
 
   /**
    * Main entry point: parses YAML content and executes the transpiled JavaScript.
    * @param {string} yamlContent - YAML string containing YAPL code
-   * @returns {*} The result of executing the transpiled code
+   * @returns {Promise<*>} The result of executing the transpiled code
    */
-  run(yamlContent) {
+  async run(yamlContent) {
     const yamlLib = getYamlLib();
     /** @type {YAPLAST} */
     const ast = yamlLib.load(yamlContent);
     
     // Process AST
-    const jsCode = this.transpile(ast);
+    const jsCode = await this.transpile(ast);
     
     // Execute generated JavaScript
     return this.execute(jsCode);
@@ -159,20 +164,48 @@ class YAPLTranspiler {
   /**
    * Transpiles a YAPL AST to JavaScript code.
    * @param {YAPLAST} ast - The parsed YAPL AST
-   * @returns {string} Generated JavaScript code
+   * @returns {Promise<string>} Generated JavaScript code
    */
-  transpile(ast) {
+  async transpile(ast) {
     /** @type {string[]} */
     const parts = [];
+    /** @type {string[]} */
+    const yaplModules = [];
+
+    // First pass: collect YAPL file imports/requires and transpile them
+    if (ast.imports && Array.isArray(ast.imports)) {
+      for (const importDef of ast.imports) {
+        if (typeof importDef === 'object' && importDef.from && importDef.from.endsWith('.yapl')) {
+          const moduleCode = await this.loadYAPLModule(importDef.from);
+          yaplModules.push(moduleCode);
+        }
+      }
+    }
+
+    if (ast.require && Array.isArray(ast.require)) {
+      for (const requireDef of ast.require) {
+        if (typeof requireDef === 'object' && requireDef.module && requireDef.module.endsWith('.yapl')) {
+          const moduleCode = await this.loadYAPLModule(requireDef.module);
+          yaplModules.push(moduleCode);
+        }
+      }
+    }
+
+    // Add YAPL modules first (they need to be inlined before imports)
+    if (yaplModules.length > 0) {
+      parts.push('// Inlined YAPL modules');
+      parts.push(...yaplModules);
+      parts.push('');
+    }
 
     // Handle ES6 imports - must be at the top
     if (ast.imports && Array.isArray(ast.imports)) {
-      ast.imports.forEach(importDef => {
-        const importCode = this.transpileImport(importDef);
+      for (const importDef of ast.imports) {
+        const importCode = await this.transpileImport(importDef);
         if (importCode) {
           parts.push(importCode);
         }
-      });
+      }
       // Add blank line after imports
       if (ast.imports.length > 0) {
         parts.push('');
@@ -181,12 +214,12 @@ class YAPLTranspiler {
 
     // Handle CommonJS require statements - typically at the top after imports
     if (ast.require && Array.isArray(ast.require)) {
-      ast.require.forEach(requireDef => {
-        const requireCode = this.transpileRequire(requireDef);
+      for (const requireDef of ast.require) {
+        const requireCode = await this.transpileRequire(requireDef);
         if (requireCode) {
           parts.push(requireCode);
         }
-      });
+      }
       // Add blank line after requires
       if (ast.require.length > 0) {
         parts.push('');
@@ -238,12 +271,159 @@ class YAPLTranspiler {
   }
 
   /**
+   * Loads and transpiles a YAPL file as a module.
+   * @param {string} filePath - Path to the YAPL file
+   * @returns {Promise<string>} JavaScript code that exports the module's functions and globals
+   * @throws {Error} If the file cannot be loaded or parsed
+   */
+  async loadYAPLModule(filePath) {
+    // Check if we've already loaded this module
+    if (this.importedModules.has(filePath)) {
+      const cached = this.importedModules.get(filePath);
+      if (cached !== undefined) {
+        return cached;
+      }
+    }
+
+    // Try to load fs and path modules (Node.js only)
+    // Check if we're in Node.js environment
+    // @ts-ignore - process is available in Node.js
+    if (typeof process === 'undefined' || !process.versions || !process.versions.node) {
+      throw new Error('YAPL file imports require Node.js environment');
+    }
+
+    let fs, path;
+    try {
+      // Try CommonJS require first (works in CommonJS)
+      // @ts-ignore - require is available in CommonJS or via createRequire
+      if (typeof require !== 'undefined') {
+        // @ts-ignore - Dynamic require for Node.js
+        fs = require('fs');
+        // @ts-ignore - Dynamic require for Node.js
+        path = require('path');
+      } else {
+        // ES module context - try to use createRequire
+        // @ts-ignore
+        const module = await import('module');
+        // @ts-ignore
+        const requireFn = module.createRequire(import.meta?.url || 'file://' + process.cwd());
+        fs = requireFn('fs');
+        path = requireFn('path');
+      }
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      throw new Error(`YAPL file imports require Node.js environment (fs and path modules). ${errorMsg}`);
+    }
+
+    // Resolve the file path
+    const resolvedPath = path.isAbsolute(filePath) 
+      ? filePath 
+      : path.resolve(this.baseDir, filePath);
+
+    // Read and parse the YAPL file
+    let yamlContent;
+    try {
+      yamlContent = fs.readFileSync(resolvedPath, 'utf8');
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      throw new Error(`Cannot read YAPL file: ${filePath} (resolved to: ${resolvedPath}) - ${errorMsg}`);
+    }
+
+    const yamlLib = getYamlLib();
+    /** @type {YAPLAST} */
+    let importedAST;
+    try {
+      importedAST = yamlLib.load(yamlContent);
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      throw new Error(`Cannot parse YAPL file: ${filePath} - ${errorMsg}`);
+    }
+
+    // Transpile the imported module (without main execution)
+    const moduleCode = await this.transpileModule(importedAST, path.dirname(resolvedPath));
+    
+    // Cache the module
+    this.importedModules.set(filePath, moduleCode);
+    
+    return moduleCode;
+  }
+
+  /**
+   * Transpiles a YAPL AST as a module (exports functions and globals, but doesn't execute main).
+   * @param {YAPLAST} ast - The parsed YAPL AST
+   * @param {string} [moduleBaseDir] - Base directory for resolving relative imports in this module
+   * @returns {Promise<string>} JavaScript code that exports the module's functions and globals
+   */
+  async transpileModule(ast, moduleBaseDir = '.') {
+    /** @type {string[]} */
+    const parts = [];
+    const oldBaseDir = this.baseDir;
+    this.baseDir = moduleBaseDir;
+
+    // Handle imports in the module (but skip .yapl files to avoid circular dependencies)
+    if (ast.imports && Array.isArray(ast.imports)) {
+      for (const importDef of ast.imports) {
+        if (typeof importDef === 'object' && importDef.from && !importDef.from.endsWith('.yapl')) {
+          const importCode = await this.transpileImport(importDef);
+          if (importCode) {
+            parts.push(importCode);
+          }
+        }
+      }
+      if (ast.imports.some(i => typeof i === 'object' && i.from && !i.from.endsWith('.yapl'))) {
+        parts.push('');
+      }
+    }
+
+    // Handle requires in the module (but skip .yapl files)
+    if (ast.require && Array.isArray(ast.require)) {
+      for (const requireDef of ast.require) {
+        if (typeof requireDef === 'object' && requireDef.module && !requireDef.module.endsWith('.yapl')) {
+          const requireCode = await this.transpileRequire(requireDef);
+          if (requireCode) {
+            parts.push(requireCode);
+          }
+        }
+      }
+      if (ast.require.some(r => typeof r === 'object' && r.module && !r.module.endsWith('.yapl'))) {
+        parts.push('');
+      }
+    }
+
+    // Transpile globals
+    const globals = [];
+    if (ast.globals) {
+      globals.push(...ast.globals.map(g => this.transpileGlobal(g)));
+    }
+
+    // Transpile functions
+    const functions = [];
+    if (ast.functions) {
+      functions.push(...ast.functions.map(f => this.transpileFunction(f)));
+    }
+
+    // Add globals and functions
+    if (globals.length > 0) {
+      parts.push(...globals);
+    }
+    if (functions.length > 0) {
+      parts.push(...functions);
+    }
+
+    // Note: We don't export here - the functions/globals are inlined and available in scope
+    // The importing code will reference them directly
+
+    this.baseDir = oldBaseDir;
+    return parts.join('\n');
+  }
+
+  /**
    * Transpiles an ES6 import definition.
    * @param {ImportDef} importDef - Import definition
-   * @returns {string} JavaScript ES6 import statement
+   * @returns {Promise<string>} JavaScript ES6 import statement or module code
    * @throws {Error} If the import definition is invalid
    */
-  transpileImport(importDef) {
+  async transpileImport(importDef) {
     if (typeof importDef === 'string') {
       // Backward compatibility: if it's a string, use it as-is
       return importDef;
@@ -254,6 +434,18 @@ class YAPLTranspiler {
     }
 
     const from = importDef.from;
+
+    // Check if this is a YAPL file import
+    if (from.endsWith('.yapl')) {
+      // YAPL modules are already inlined above, so we just need to reference the exports
+      // The module code has already been added, so we return an empty string here
+      // The actual imports will be handled by the inlined module exports
+      // Note: For ES6 imports of YAPL files, the functions/globals are already in scope
+      // from the inlined module, so we don't need to generate an import statement
+      return '';
+    }
+
+    // Regular JavaScript import
     const parts = [];
 
     // Handle default import
@@ -289,10 +481,10 @@ class YAPLTranspiler {
   /**
    * Transpiles a CommonJS require definition.
    * @param {RequireDef} requireDef - Require definition
-   * @returns {string} JavaScript CommonJS require statement
+   * @returns {Promise<string>} JavaScript CommonJS require statement
    * @throws {Error} If the require definition is invalid
    */
-  transpileRequire(requireDef) {
+  async transpileRequire(requireDef) {
     if (typeof requireDef === 'string') {
       // Backward compatibility: if it's a string, use it as-is
       return requireDef;
@@ -303,6 +495,72 @@ class YAPLTranspiler {
     }
 
     const module = requireDef.module;
+
+    // Check if this is a YAPL file require
+    if (module.endsWith('.yapl')) {
+      // YAPL modules are already inlined above, so the functions/globals are already in scope
+      // We just need to create references to them (no need to redeclare)
+      const yamlLib = getYamlLib();
+      let fs, path;
+      try {
+        // @ts-ignore - require is available in CommonJS or via createRequire
+        if (typeof require !== 'undefined') {
+          // @ts-ignore
+          fs = require('fs');
+          // @ts-ignore
+          path = require('path');
+        } else {
+          // @ts-ignore
+          const module = await import('module');
+          // @ts-ignore
+          const requireFn = module.createRequire(import.meta?.url || 'file://' + process.cwd());
+          fs = requireFn('fs');
+          path = requireFn('path');
+        }
+      } catch (e) {
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        throw new Error(`YAPL file requires need Node.js environment. ${errorMsg}`);
+      }
+
+      const resolvedPath = path.isAbsolute(module) 
+        ? module 
+        : path.resolve(this.baseDir, module);
+      const yamlContent = fs.readFileSync(resolvedPath, 'utf8');
+      const importedAST = yamlLib.load(yamlContent);
+
+      // Get list of exported names
+      /** @type {string[]} */
+      const exportedNames = [];
+      if (importedAST.globals) {
+        importedAST.globals.forEach((/** @type {GlobalDef} */ g) => {
+          exportedNames.push(g.name);
+        });
+      }
+      if (importedAST.functions) {
+        importedAST.functions.forEach((/** @type {FunctionDef} */ f) => {
+          exportedNames.push(f.name);
+        });
+      }
+
+      // Generate require statement - functions/globals are already in scope from inlined module
+      // So we just create references (no const declarations for named imports)
+      if (requireDef.default) {
+        // Default export: create an object with all exports
+        return `const ${requireDef.default} = { ${exportedNames.map(k => `${k}`).join(', ')} };`;
+      }
+      if (requireDef.named && Array.isArray(requireDef.named) && requireDef.named.length > 0) {
+        // Named imports: they're already in scope, so we don't need to declare them
+        // Just return empty string - the names are already available
+        return '';
+      }
+      if (requireDef.alias) {
+        // Alias: create an object with all exports
+        return `const ${requireDef.alias} = { ${exportedNames.map(k => `${k}`).join(', ')} };`;
+      }
+      throw new Error('YAPL require must specify at least one of: default, named, or alias');
+    }
+
+    // Regular JavaScript require
     const requireExpr = `require('${module}')`;
 
     // Handle default require

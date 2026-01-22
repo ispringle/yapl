@@ -76,10 +76,11 @@ npm run typecheck
 
 ### Top-level Structure
 
+- `imports`: List of ES6 import definitions (optional)
+- `require`: List of CommonJS require definitions (optional)
 - `functions`: List of function definitions
 - `globals`: List of global variable declarations
 - `main`: Main execution point (list of steps)
-- `imports`: List of external file paths (optional, for future expansion)
 
 ### Function Definition
 
@@ -127,7 +128,7 @@ if:
 while:
   cond: ['<', i, 10]
   body:
-    - [console.log, i]
+    - [.console.log, i]
     - [setVariable, i, ['+', i, 1]]
 ```
 
@@ -140,21 +141,100 @@ let:
 
 ### JavaScript Integration
 
-Any identifier that isn't a YAPL function or global is treated as a JavaScript global. This means you can use:
+To access JavaScript identifiers (like `Math.PI`, `console.log`, etc.), use a **dot prefix** (`.`) to explicitly mark them as JavaScript identifiers:
 
-- `console.log`
-- `Math.max`
-- `Date.now`
-- `Array.from`
-- Any other JavaScript global
+- `.Math.PI` → JavaScript's `Math.PI`
+- `.console.log` → JavaScript's `console.log`
+- `.true`, `.false`, `.undefined` → JavaScript primitives
+- `.NaN`, `.Infinity` → JavaScript constants
+
+**Why the dot prefix?**
+- Strings without dots are treated as string literals (e.g., `"Math.PI"` → string literal)
+- Dot-prefixed identifiers are treated as JavaScript identifiers (e.g., `.Math.PI` → JavaScript constant)
+- YAPL functions/globals take precedence and don't need the dot prefix
 
 Example:
 ```yaml
 main:
   - [.console.log, "Hello from JavaScript!"]
   - [.Math.max, 1, 2, 3, 4, 5]
-  - [.Date.now]
+  - .Math.PI  # Returns 3.141592653589793
+  - .Date.now
 ```
+
+### Imports and Requires
+
+YAPL supports both ES6 imports and CommonJS requires with a structured format similar to functions.
+
+**ES6 Imports:**
+```yaml
+imports:
+  - from: 'fs'
+    default: fs
+  - from: 'fs/promises'
+    named: [readFile, writeFile]
+  - from: 'path'
+    alias: path  # Creates: import * as path from 'path'
+  - from: 'os'
+    default: os
+    named: [platform]  # Can combine default and named
+```
+
+**CommonJS Requires:**
+```yaml
+require:
+  - module: 'fs'
+    default: fs
+  - module: 'util'
+    named: [promisify, inspect]
+  - module: 'path'
+    alias: path  # Creates: const path = require('path')
+```
+
+**Import/Require Options:**
+- `from` / `module`: The module path to import/require
+- `default`: Default import name (e.g., `fs` for `import fs from 'fs'`)
+- `named`: Array of named imports (e.g., `[readFile, writeFile]` for `import { readFile, writeFile }`)
+- `alias`: Namespace alias (e.g., `path` for `import * as path from 'path'`)
+
+### Importing YAPL Files
+
+You can import or require other YAPL files (`.yapl` extension). YAPL files export all their functions and globals:
+
+**Example - `math.yapl`:**
+```yaml
+functions:
+  - name: add
+    params: [a, b]
+    body:
+      - ['+', a, b]
+
+globals:
+  - name: pi
+    value: 3.14159
+```
+
+**Example - `main.yapl`:**
+```yaml
+require:
+  - module: './math.yapl'
+    named: [add, pi]
+
+main:
+  - [add, pi, 2]
+```
+
+**Or using ES6 imports:**
+```yaml
+imports:
+  - from: './math.yapl'
+    named: [add, pi]
+
+main:
+  - [add, pi, 2]
+```
+
+**Note:** YAPL file imports require Node.js environment and work best when using the CLI tool. The imported YAPL file's `main` section is not executed when imported - only its functions and globals are made available.
 
 ## Examples
 
